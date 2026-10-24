@@ -1,0 +1,6 @@
+PathSpec 1.1.1
+Author: Caleb P. Burns
+Source: https://github.com/cpburnz/python-pathspec
+License: Mozilla Public License 2.0 (see pathspec-License.txt)
+
+Used without modification for Git gitignore path pattern matching.
