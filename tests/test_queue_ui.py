@@ -425,30 +425,129 @@ def test_details_runs_background_check(workspace, qt_app, monkeypatch):
     assert not dialog.rules.isVisible()
     assert not dialog.check_state.isVisible()
     assert not dialog.results.isVisible()
-    QTest.mouseClick(dialog.rules_section.toggle, Qt.MouseButton.LeftButton)
+    assert dialog.tabs.currentRow() == dialog.page_indexes["overview"]
+    assert (
+        not dialog.tabs.item(dialog.page_indexes["game_files"]).flags() & Qt.ItemFlag.ItemIsEnabled
+    )
+    item = dialog.tabs.item(dialog.page_indexes["rules"])
+    QTest.mouseClick(
+        dialog.tabs.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=dialog.tabs.visualItemRect(item).center(),
+    )
     assert dialog.rules.isVisible()
-    dialog.rules_section.toggle.setFocus()
-    QTest.keyClick(dialog.rules_section.toggle, Qt.Key.Key_Space)
+    assert dialog.rules.height() > 250
+    assert dialog.pages.width() > dialog.width() * 0.6
+    original_size = dialog.rules.size()
+    dialog.resize(1020, 700)
+    qt_app.processEvents()
+    assert dialog.rules.width() > original_size.width()
+    assert dialog.rules.height() > original_size.height()
+    dialog.tabs.setFocus()
+    QTest.keyClick(dialog.tabs, Qt.Key.Key_Down)
+    assert dialog.tabs.currentRow() == dialog.page_indexes["extras"]
     assert not dialog.rules.isVisible()
     opened = []
+    assert dialog.extras.isVisible()
+    assert dialog.edit_button.isVisible() and dialog.check_button.isVisible()
     monkeypatch.setattr(
         "dc_modpack_creator.dialogs.open_text_file", lambda parent, path: opened.append(path)
     )
     dialog.edit_button.click()
     assert opened == [path]
+    dialog.show_page("check")
+    assert dialog.check_hint.isVisible()
     dialog.check_config()
-    assert dialog.check_section.toggle.isChecked()
-    deadline = time.monotonic() + 5
-    while dialog.worker.isRunning() and time.monotonic() < deadline:
-        qt_app.processEvents()
-        QTest.qWait(5)
-    qt_app.processEvents()
+    assert not dialog.check_hint.isVisible()
+    assert dialog.tabs.currentRow() == dialog.page_indexes["check"]
+    wait_worker(dialog.worker, qt_app)
     assert dialog.plan
     assert dialog.summary_values["minecraft"].text() == "1.21.1"
     assert dialog.summary_values["source"].text() == ".minecraft/versions/test"
     assert "规则命中统计" in dialog.results.toPlainText()
+    assert dialog.tabs.item(dialog.page_indexes["game_files"]).flags() & Qt.ItemFlag.ItemIsEnabled
+    assert (
+        dialog.tabs.item(dialog.page_indexes["external_files"]).flags() & Qt.ItemFlag.ItemIsEnabled
+    )
+    dialog.show_page("game_files")
+    assert dialog.game_files.isVisible()
+    assert "mods/模组.jar" in dialog.game_files.toPlainText()
+    assert "skip.disabled" not in dialog.game_files.toPlainText()
+    dialog.show_page("external_files")
+    assert not dialog.external_files.toPlainText()
+    assert dialog.external_files.placeholderText() == "没有额外文件"
     dialog.header.close_button.click()
     assert not dialog.isVisible()
+
+
+def test_details_tabs_refresh_after_config_changes(workspace, qt_app):
+    app, _, settings = workspace
+    save_settings(app, settings)
+    (app.work / "说明.txt").write_text("说明", encoding="utf-8")
+    path = write_task(
+        app,
+        full=True,
+        extra='\n[[extras]]\nsource="说明.txt"\ndestination="说明/说明.txt"\n',
+    )
+    dialog = DetailDialog(path, app, settings)
+    dialog.show()
+    dialog.check_config()
+    wait_worker(dialog.worker, qt_app)
+    assert dialog.plan
+    assert "说明.txt → 说明/说明.txt" in dialog.extras.toPlainText()
+    assert "说明/说明.txt" in dialog.external_files.toPlainText()
+    assert "启动Minecraft.exe" in dialog.external_files.toPlainText()
+    dialog.show_page("game_files")
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace('version = "v1"', 'version = "v2"')
+        .replace("mods/\n!*.disabled\nconfig/", "config/"),
+        encoding="utf-8",
+    )
+    dialog.file_changed()
+    qt_app.processEvents()
+    assert dialog.tabs.currentRow() == dialog.page_indexes["check"]
+    assert dialog.check_state.text() == "需要重新检查"
+    assert dialog.check_hint.isHidden()
+    assert not dialog.plan
+    assert not dialog.results.isVisible()
+    assert not dialog.game_files.toPlainText()
+    assert (
+        not dialog.tabs.item(dialog.page_indexes["game_files"]).flags() & Qt.ItemFlag.ItemIsEnabled
+    )
+    dialog.check_config()
+    wait_worker(dialog.worker, qt_app)
+    assert dialog.plan
+    assert dialog.rules.toPlainText() == "config/"
+    assert dialog.summary_values["pack"].text() == "测试包 · v2"
+    assert "mods/模组.jar" not in dialog.game_files.toPlainText()
+    assert "config/中文 $ 配置.txt" in dialog.game_files.toPlainText()
+    dialog.close()
+
+
+def test_details_invalid_config_keeps_navigation_and_editing(workspace, qt_app):
+    app, _, settings = workspace
+    save_settings(app, settings)
+    path = write_task(app)
+    path.write_text("[pack\n", encoding="utf-8")
+    dialog = DetailDialog(path, app, settings)
+    dialog.show()
+    qt_app.processEvents()
+    assert dialog.config_error.isVisible()
+    assert dialog.edit_button.isEnabled()
+    dialog.show_page("rules")
+    assert dialog.rules.isVisible()
+    assert dialog.rules.toPlainText() == "无法解析配置"
+    dialog.check_config()
+    wait_worker(dialog.worker, qt_app)
+    assert dialog.tabs.currentRow() == dialog.page_indexes["check"]
+    assert dialog.check_state.text() == "预检失败"
+    assert dialog.results.isVisible() and dialog.results.toPlainText()
+    assert (
+        not dialog.tabs.item(dialog.page_indexes["game_files"]).flags() & Qt.ItemFlag.ItemIsEnabled
+    )
+    assert dialog.check_button.isEnabled()
+    dialog.close()
 
 
 def test_corrupt_settings_repair_preserves_original(workspace):

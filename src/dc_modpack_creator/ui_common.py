@@ -182,11 +182,14 @@ QLabel#title { font-size: 20px; font-weight: 600; }
 QLabel#name { font-weight: 600; }
 QLabel#muted { color: #667085; font-size: 12px; }
 QLabel#detailTitle { font-size: 18px; font-weight: 500; }
+QLabel#detailPageTitle { font-size: 16px; font-weight: 600; }
 QLabel#detailKey { color: #667085; }
-QFrame#detailSection { border: none; border-top: 1px solid #DDE2E8; }
-QToolButton#detailToggle { background: transparent; border: none; min-height: 46px; padding: 0; text-align: left; }
-QToolButton#detailToggle:hover { color: #2F6FAD; }
-QPlainTextEdit#detailText { background: #EEF1F5; color: #667085; border: none; border-radius: 6px; padding: 10px; }
+QListWidget#detailTabs { background: #FFFFFF; border: none; border-radius: 10px; padding: 8px; }
+QListWidget#detailTabs::item { color: #667085; border: none; border-radius: 7px; padding: 0 10px; }
+QListWidget#detailTabs::item:hover { background: #F5F7FA; color: #182230; }
+QListWidget#detailTabs::item:selected { background: #EAF1F8; color: #2F6FAD; font-weight: 600; }
+QListWidget#detailTabs::item:disabled { color: #98A2B3; background: transparent; }
+QPlainTextEdit#detailText { background: #FFFFFF; color: #182230; border: none; padding: 0; }
 QLabel#error { color: #B42318; }
 QLabel#success { color: #287A4B; }
 QPushButton { background: #FFFFFF; border: 1px solid #DDE2E8; border-radius: 7px; min-height: 34px; padding: 0 14px; }

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import time
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -53,6 +54,8 @@ instance.mkdir(parents=True, exist_ok=True)
 (instance / "mods").mkdir(exist_ok=True)
 (instance / "mods/fabric-api.jar").write_bytes(b"visual QA fixture")
 (root / "启动Minecraft.exe").write_bytes(b"visual QA fixture")
+example = Path("src/dc_modpack_creator/assets/templates/导出配置示例.toml")
+preview_rules = tomllib.loads(example.read_text(encoding="utf-8"))["files"]["rules"]
 for filename, full in (("DC生存服", True), ("DC生存服-voxy", True), ("DC活动服", False)):
     (app.configs / (filename + ".toml")).write_text(
         f"""[pack]
@@ -64,7 +67,7 @@ instance_dir = ".minecraft/versions/test"
 [launcher]
 executable = "启动Minecraft.exe"
 [files]
-rules = "mods/"
+rules = '''{preview_rules}'''
 """,
         encoding="utf-8",
     )
@@ -125,11 +128,9 @@ detail = DetailDialog(app.configs / "DC生存服.toml", app, settings, window)
 detail.metadata_worker.wait(5000)
 qt.processEvents()
 capture(detail, "details")
-detail.rules_section.set_expanded(True)
+detail.show_page("rules")
 qt.processEvents()
-detail.scroll.ensureWidgetVisible(detail.rules_section)
 capture(detail, "details-rules")
-detail.rules_section.set_expanded(False)
 detail.check_config()
 deadline = time.monotonic() + 10
 while detail.worker.isRunning() and time.monotonic() < deadline:
@@ -137,11 +138,12 @@ while detail.worker.isRunning() and time.monotonic() < deadline:
     QTest.qWait(5)
 qt.processEvents()
 assert detail.plan, detail.results.toPlainText()
-detail.scroll.ensureWidgetVisible(detail.check_section)
 capture(detail, "details-checked")
-detail.show_files.setChecked(True)
+detail.show_page("game_files")
 capture(detail, "details-files")
-detail.check_section.set_expanded(False)
+detail.show_page("external_files")
+capture(detail, "details-external-files")
+detail.show_page("overview")
 detail.update_summary(
     replace(
         detail.config,
@@ -150,12 +152,12 @@ detail.update_summary(
         output_dir=root / ("较长的输出目录名称/" * 8),
     )
 )
-detail.resize(580, 450)
+detail.resize(760, 520)
 qt.processEvents()
-detail.scroll.verticalScrollBar().setValue(0)
+detail.overview_scroll.verticalScrollBar().setValue(0)
 capture(detail, "details-long-paths")
 assert detail.check_button.geometry().bottom() < detail.surface.height()
-assert not detail.scroll.horizontalScrollBar().isVisible()
+assert not detail.overview_scroll.horizontalScrollBar().isVisible()
 detail.close()
 invalid = root / "invalid-config.toml"
 invalid.write_text("[pack\n", encoding="utf-8")

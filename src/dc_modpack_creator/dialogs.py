@@ -4,7 +4,7 @@ from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
+from PySide6.QtCore import QFileSystemWatcher, QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -13,13 +13,15 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
     QSizeGrip,
     QSizePolicy,
     QSpinBox,
-    QToolButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -35,7 +37,7 @@ from .config import (
     validate_compression,
 )
 from .errors import ExportError
-from .planner import PERSONAL_DIRS, PERSONAL_FILES, PreflightResult
+from .planner import PreflightResult
 from .queue import CheckWorker, MetadataWorker, TaskRecord
 from .ui_common import (
     CheckBox,
@@ -214,35 +216,6 @@ class SettingsDialog(FramelessDialog):
             QTimer.singleShot(0, self.adjustSize)
 
 
-class DetailSection(QFrame):
-    def __init__(self, title: str):
-        super().__init__()
-        self.setObjectName("detailSection")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.toggle = QToolButton()
-        self.toggle.setObjectName("detailToggle")
-        self.toggle.setText(title)
-        self.toggle.setCheckable(True)
-        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.content = QWidget()
-        self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(16, 0, 0, 16)
-        self.content_layout.setSpacing(12)
-        layout.addWidget(self.toggle)
-        layout.addWidget(self.content)
-        self.toggle.toggled.connect(self.set_expanded)
-        self.set_expanded(False)
-
-    def set_expanded(self, expanded: bool) -> None:
-        self.toggle.setChecked(expanded)
-        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
-        self.content.setVisible(expanded)
-
-
 class DetailDialog(FramelessDialog):
     def __init__(self, path: Path, app: AppPaths, settings: Settings, parent=None):
         super().__init__(path.name, parent)
@@ -254,24 +227,40 @@ class DetailDialog(FramelessDialog):
         self.config = None
         self.checked_stamp = None
         self.plan = None
-        self.resize(660, 470)
-        self.setMinimumSize(580, 450)
+        self.resize(900, 600)
+        self.setMinimumSize(760, 520)
         self.header.title.setObjectName("detailTitle")
         layout = self.body
         layout.setSpacing(18)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName("listContent")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 10, 4, 0)
-        content_layout.setSpacing(0)
-        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.scroll.setWidget(content)
-        layout.addWidget(self.scroll, 1)
+        content = QHBoxLayout()
+        content.setSpacing(16)
+        self.tabs = QListWidget()
+        self.tabs.setObjectName("detailTabs")
+        self.tabs.setAccessibleName("详情分类")
+        self.tabs.setFixedWidth(176)
+        self.tabs.setSpacing(4)
+        self.tabs.setUniformItemSizes(True)
+        self.tabs.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tabs.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pages = QStackedWidget()
+        self.pages.setMinimumWidth(0)
+        self.page_indexes: dict[str, int] = {}
+        self.tabs.currentRowChanged.connect(self.pages.setCurrentIndex)
+        content.addWidget(self.tabs)
+        content.addWidget(self.pages, 1)
+        layout.addLayout(content, 1)
+
+        overview = self.add_page("overview", "概览")
+        self.overview_scroll = QScrollArea()
+        self.overview_scroll.setWidgetResizable(True)
+        self.overview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        summary_content = QWidget()
+        summary_content.setObjectName("listContent")
+        summary_layout = QVBoxLayout(summary_content)
+        summary_layout.setContentsMargins(0, 0, 8, 0)
+        summary_layout.setSpacing(16)
         summary = QGridLayout()
-        summary.setContentsMargins(0, 0, 0, 20)
+        summary.setContentsMargins(0, 0, 0, 0)
         summary.setHorizontalSpacing(16)
         summary.setVerticalSpacing(14)
         summary.setColumnMinimumWidth(0, 72)
@@ -292,75 +281,53 @@ class DetailDialog(FramelessDialog):
             summary.addWidget(heading, row, 0, Qt.AlignmentFlag.AlignTop)
             summary.addWidget(value, row, 1)
             self.summary_values[key] = value
-        content_layout.addLayout(summary)
+        summary_layout.addLayout(summary)
         self.config_error = label("", "error", wrap=True)
         self.config_error.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.config_error.setContentsMargins(0, 0, 0, 16)
         self.config_error.hide()
-        content_layout.addWidget(self.config_error)
+        summary_layout.addWidget(self.config_error)
+        summary_layout.addStretch()
+        self.overview_scroll.setWidget(summary_content)
+        overview.addWidget(self.overview_scroll, 1)
+
+        self.rules = self.add_text_page("rules", "游戏文件导出规则")
+        self.extras = self.add_text_page("extras", "额外文件导出规则")
+        check = self.add_page("check", "预检结果")
+        self.check_state = label("尚未检查", "muted", True)
+        self.check_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        check.addWidget(self.check_state)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        check.addWidget(self.progress)
+        self.check_placeholder = QWidget()
+        placeholder = QVBoxLayout(self.check_placeholder)
+        placeholder.setContentsMargins(0, 0, 0, 0)
+        self.check_hint = label("点击「检查配置」查看错误、警告和规则命中统计。", "muted", True)
+        placeholder.addWidget(self.check_hint)
+        placeholder.addStretch()
+        check.addWidget(self.check_placeholder, 1)
+        self.results = self.text_view()
+        self.results.hide()
+        check.addWidget(self.results, 1)
+        self.game_files = self.add_text_page("game_files", "游戏文件清单")
+        self.game_files.setPlaceholderText("没有选中的游戏实例文件")
+        self.external_files = self.add_text_page("external_files", "额外文件清单")
+        self.external_files.setPlaceholderText("没有额外文件")
+        self.set_file_lists_available(False)
+        self.show_page("overview")
         try:
             c = load_task(path, app, settings)
             self.config = c
-            self.update_summary(c)
+            self.update_config(c)
             self.summary_values["minecraft"].setText("正在识别…")
-            rule_text = (
-                "游戏规则\n"
-                + c.rules
-                + "\n\n额外映射\n"
-                + (
-                    "\n".join(f"{self.display_path(e.source)} → {e.destination}" for e in c.extras)
-                    or "无"
-                )
-            )
-            if c.full_package:
-                rule_text += (
-                    "\n\n自动 PCL 内容\n实例 PCL → overrides/PCL\n启动器 → 启动Minecraft.exe\n"
-                    + "、".join((*PERSONAL_DIRS, *PERSONAL_FILES))
-                    + " → PCL/"
-                )
         except (ExportError, OSError) as exc:
             for value in self.summary_values.values():
                 value.setText("—")
             self.config_error.setText(str(exc))
             self.config_error.show()
-            rule_text = "无法解析配置"
-        self.rules_section = DetailSection("文件与规则")
-        content_layout.addWidget(self.rules_section)
-        self.rules = QPlainTextEdit()
-        self.rules.setObjectName("detailText")
-        self.rules.setReadOnly(True)
-        self.rules.setPlainText(rule_text)
-        self.rules.setFixedHeight(180)
-        self.rules_section.content_layout.addWidget(self.rules)
-        self.check_section = DetailSection("预检结果")
-        content_layout.addWidget(self.check_section)
-        self.check_state = label("尚未检查", "muted", True)
-        self.check_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.check_section.content_layout.addWidget(self.check_state)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.hide()
-        self.check_section.content_layout.addWidget(self.progress)
-        self.results = QPlainTextEdit()
-        self.results.setObjectName("detailText")
-        self.results.setReadOnly(True)
-        self.results.setFixedHeight(150)
-        self.results.hide()
-        self.check_section.content_layout.addWidget(self.results)
-        self.game_files_section = DetailSection("最终文件清单（游戏实例）")
-        self.external_files_section = DetailSection("最终文件清单（外部文件）")
-        self.game_files = QPlainTextEdit()
-        self.external_files = QPlainTextEdit()
-        for section, files in (
-            (self.game_files_section, self.game_files),
-            (self.external_files_section, self.external_files),
-        ):
-            section.hide()
-            content_layout.addWidget(section)
-            files.setObjectName("detailText")
-            files.setReadOnly(True)
-            files.setFixedHeight(180)
-            section.content_layout.addWidget(files)
+            for text in (self.rules, self.extras):
+                text.setPlainText("无法解析配置")
         bottom = QHBoxLayout()
         self.edit_button = button("编辑配置", lambda: open_text_file(self, path), "secondary")
         self.edit_button.setMinimumWidth(118)
@@ -377,6 +344,48 @@ class DetailDialog(FramelessDialog):
             self.metadata_worker.result.connect(self.metadata_ready)
             self.metadata_worker.start()
 
+    def add_page(self, key: str, title: str) -> QVBoxLayout:
+        page = QFrame()
+        page.setObjectName("card")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+        heading = label(title, "detailPageTitle")
+        heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(heading)
+        self.page_indexes[key] = self.pages.addWidget(page)
+        item = QListWidgetItem(title)
+        item.setSizeHint(QSize(156, 40))
+        self.tabs.addItem(item)
+        return layout
+
+    def text_view(self) -> QPlainTextEdit:
+        text = QPlainTextEdit()
+        text.setObjectName("detailText")
+        text.setReadOnly(True)
+        text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        return text
+
+    def add_text_page(self, key: str, title: str) -> QPlainTextEdit:
+        layout = self.add_page(key, title)
+        text = self.text_view()
+        layout.addWidget(text, 1)
+        return text
+
+    def show_page(self, key: str) -> None:
+        self.tabs.setCurrentRow(self.page_indexes[key])
+
+    def set_file_lists_available(self, available: bool) -> None:
+        for key in ("game_files", "external_files"):
+            item = self.tabs.item(self.page_indexes[key])
+            flags = item.flags()
+            item.setFlags(
+                flags | Qt.ItemFlag.ItemIsEnabled
+                if available
+                else flags & ~Qt.ItemFlag.ItemIsEnabled
+            )
+            item.setToolTip("" if available else "检查配置通过后可查看")
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.resize_grip.move(self.surface.width() - 22, self.surface.height() - 22)
@@ -387,6 +396,14 @@ class DetailDialog(FramelessDialog):
         except ValueError:
             return str(path)
 
+    def update_config(self, config: TaskConfig, dependencies: dict | None = None) -> None:
+        self.update_summary(config, dependencies)
+        self.rules.setPlainText(config.rules.strip("\n"))
+        self.extras.setPlainText(
+            "\n".join(f"{self.display_path(e.source)} → {e.destination}" for e in config.extras)
+            or "无额外文件映射"
+        )
+
     def update_summary(self, config: TaskConfig, dependencies: dict | None = None) -> None:
         product = "mrpack包"
         if config.full_package:
@@ -394,7 +411,7 @@ class DetailDialog(FramelessDialog):
                 f"分卷 {size_text(config.volume_size)}" if config.volume_size else "不分卷"
             )
         for key, text in (
-            ("pack", f"{config.name} · {config.version}"),
+            ("pack", " · ".join(part for part in (config.name, config.version) if part)),
             ("product", product),
             ("source", self.display_path(config.instance_dir)),
             ("output", self.display_path(config.target)),
@@ -431,23 +448,28 @@ class DetailDialog(FramelessDialog):
             return None
 
     def file_changed(self) -> None:
+        self.clear_check()
         self.check_state.setText("需要重新检查")
         self.reveal_check()
         if self.path.exists() and str(self.path) not in self.watcher.files():
             self.watcher.addPath(str(self.path))
 
     def reveal_check(self) -> None:
-        self.check_section.set_expanded(True)
-        # Expansion and result updates change the scroll content's layout first.
-        QTimer.singleShot(0, self.scroll_to_check)
+        self.show_page("check")
 
-    def scroll_to_check(self) -> None:
-        self.scroll.widget().layout().activate()
-        self.scroll.ensureWidgetVisible(self.check_section, 0, 0)
+    def clear_check(self) -> None:
+        self.plan = None
+        self.results.clear()
+        self.results.hide()
+        self.check_placeholder.show()
+        self.game_files.clear()
+        self.external_files.clear()
+        self.set_file_lists_available(False)
 
     def check_config(self) -> None:
         if self.worker and self.worker.isRunning():
             return
+        self.check_hint.hide()
         self.reveal_check()
         try:
             settings = load_settings(self.app)
@@ -455,15 +477,7 @@ class DetailDialog(FramelessDialog):
             self.check_state.setText(str(exc))
             return
         self.checked_stamp = self.stamp()
-        self.plan = None
-        self.results.clear()
-        self.results.hide()
-        self.game_files.clear()
-        self.external_files.clear()
-        self.game_files_section.set_expanded(False)
-        self.external_files_section.set_expanded(False)
-        self.game_files_section.hide()
-        self.external_files_section.hide()
+        self.clear_check()
         self.check_state.setText("正在检查")
         self.check_button.setEnabled(False)
         self.progress.show()
@@ -477,11 +491,10 @@ class DetailDialog(FramelessDialog):
     def checked(self, result: PreflightResult) -> None:
         self.progress.hide()
         self.plan = result.plan
-        self.results.setVisible(bool(result.error or result.plan))
-        self.game_files_section.set_expanded(False)
-        self.external_files_section.set_expanded(False)
-        self.game_files_section.setVisible(bool(result.plan))
-        self.external_files_section.hide()
+        has_result = bool(result.error or result.plan)
+        self.results.setVisible(has_result)
+        self.check_placeholder.setVisible(not has_result)
+        self.set_file_lists_available(bool(result.plan))
         if result.cancelled:
             self.check_state.setText("已取消")
         elif result.error:
@@ -491,12 +504,13 @@ class DetailDialog(FramelessDialog):
             p = result.plan
             self.config = p.config
             self.config_error.hide()
-            self.update_summary(p.config, p.dependencies)
+            self.update_config(p.config, p.dependencies)
             self.check_state.setText(
                 f"{len(p.files)} 个文件 · {size_text(p.total_bytes)} · {len(p.warnings)} 项警告"
             )
             self.render_result()
         if self.stamp() != self.checked_stamp:
+            self.clear_check()
             self.check_state.setText("需要重新检查")
         self.reveal_check()
 
@@ -521,7 +535,6 @@ class DetailDialog(FramelessDialog):
                 external_files.append(f"{f.destination}  ({size_text(f.size)})")
         self.game_files.setPlainText("\n".join(game_files))
         self.external_files.setPlainText("\n".join(external_files))
-        self.external_files_section.setVisible(bool(external_files))
 
     def done(self, result: int) -> None:
         if self.metadata_worker and self.metadata_worker.isRunning():
