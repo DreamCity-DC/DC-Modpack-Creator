@@ -341,17 +341,26 @@ class DetailDialog(FramelessDialog):
         self.progress.setRange(0, 0)
         self.progress.hide()
         self.check_section.content_layout.addWidget(self.progress)
-        self.show_files = CheckBox("显示最终文件清单")
-        self.show_files.setEnabled(False)
-        self.show_files.toggled.connect(self.render_result)
-        self.show_files.hide()
-        self.check_section.content_layout.addWidget(self.show_files)
         self.results = QPlainTextEdit()
         self.results.setObjectName("detailText")
         self.results.setReadOnly(True)
         self.results.setFixedHeight(150)
         self.results.hide()
         self.check_section.content_layout.addWidget(self.results)
+        self.game_files_section = DetailSection("最终文件清单（游戏实例）")
+        self.external_files_section = DetailSection("最终文件清单（外部文件）")
+        self.game_files = QPlainTextEdit()
+        self.external_files = QPlainTextEdit()
+        for section, files in (
+            (self.game_files_section, self.game_files),
+            (self.external_files_section, self.external_files),
+        ):
+            section.hide()
+            content_layout.addWidget(section)
+            files.setObjectName("detailText")
+            files.setReadOnly(True)
+            files.setFixedHeight(180)
+            section.content_layout.addWidget(files)
         bottom = QHBoxLayout()
         self.edit_button = button("编辑配置", lambda: open_text_file(self, path), "secondary")
         self.edit_button.setMinimumWidth(118)
@@ -449,8 +458,12 @@ class DetailDialog(FramelessDialog):
         self.plan = None
         self.results.clear()
         self.results.hide()
-        self.show_files.setEnabled(False)
-        self.show_files.hide()
+        self.game_files.clear()
+        self.external_files.clear()
+        self.game_files_section.set_expanded(False)
+        self.external_files_section.set_expanded(False)
+        self.game_files_section.hide()
+        self.external_files_section.hide()
         self.check_state.setText("正在检查")
         self.check_button.setEnabled(False)
         self.progress.show()
@@ -465,7 +478,10 @@ class DetailDialog(FramelessDialog):
         self.progress.hide()
         self.plan = result.plan
         self.results.setVisible(bool(result.error or result.plan))
-        self.show_files.setVisible(bool(result.plan))
+        self.game_files_section.set_expanded(False)
+        self.external_files_section.set_expanded(False)
+        self.game_files_section.setVisible(bool(result.plan))
+        self.external_files_section.hide()
         if result.cancelled:
             self.check_state.setText("已取消")
         elif result.error:
@@ -479,7 +495,6 @@ class DetailDialog(FramelessDialog):
             self.check_state.setText(
                 f"{len(p.files)} 个文件 · {size_text(p.total_bytes)} · {len(p.warnings)} 项警告"
             )
-            self.show_files.setEnabled(True)
             self.render_result()
         if self.stamp() != self.checked_stamp:
             self.check_state.setText("需要重新检查")
@@ -495,11 +510,18 @@ class DetailDialog(FramelessDialog):
         )
         if p.existing:
             text += "\n\n已有目标文件\n" + "\n".join(str(x) for x in p.existing)
-        if self.show_files.isChecked():
-            text += "\n\n最终文件清单\n" + "\n".join(
-                f"{f.layer}/{f.destination}  ({size_text(f.size)})" for f in p.files
-            )
         self.results.setPlainText(text)
+        game_files, external_files = [], []
+        for f in p.files:
+            if f.layer == "inner" and f.destination.startswith("overrides/"):
+                game_files.append(
+                    f"{f.destination.removeprefix('overrides/')}  ({size_text(f.size)})"
+                )
+            else:
+                external_files.append(f"{f.destination}  ({size_text(f.size)})")
+        self.game_files.setPlainText("\n".join(game_files))
+        self.external_files.setPlainText("\n".join(external_files))
+        self.external_files_section.setVisible(bool(external_files))
 
     def done(self, result: int) -> None:
         if self.metadata_worker and self.metadata_worker.isRunning():
