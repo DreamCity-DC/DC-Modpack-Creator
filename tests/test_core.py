@@ -64,15 +64,15 @@ def test_settings_roundtrip_and_discovery(workspace):
     app, _, settings = workspace
     settings = replace(
         settings,
+        level=9,
         selected_configs=("导出/中文.toml",),
         volume_size=3 * 1024**3,
         window={"x": 12, "y": 34},
     )
     save_settings(app, settings)
-    assert (
-        tomllib.loads(app.settings.read_text(encoding="utf-8"))["compression"]["volume_size_bytes"]
-        == "3GB"
-    )
+    saved = tomllib.loads(app.settings.read_text(encoding="utf-8"))
+    assert "compression" not in saved
+    assert saved["output"] == {"compression_level": 9, "compression_volume_size": "3GB"}
     assert load_settings(app) == settings
     task = write_task(app)
     assert app.discover() == [task]
@@ -86,23 +86,25 @@ def test_compression_volume_accepts_nonnegative_integers():
             validate_compression(5, n, 0)
 
 
-def test_legacy_global_output_is_ignored_and_removed_on_save(workspace):
+def test_legacy_global_output_directory_is_ignored_and_removed_on_save(workspace):
     app, _, settings = workspace
     save_settings(app, settings)
     app.settings.write_text(
-        app.settings.read_text(encoding="utf-8") + '\n[output]\ndirectory = "旧输出目录"\n',
+        app.settings.read_text(encoding="utf-8").replace(
+            "[output]\n", '[output]\ndirectory = "旧输出目录"\n'
+        ),
         encoding="utf-8",
     )
     loaded = load_settings(app)
     assert loaded == settings
     path = write_task(app)
     path.write_text(
-        path.read_text(encoding="utf-8").replace('[output]\ndirectory = "out"', ""),
+        path.read_text(encoding="utf-8").replace('directory = "out"', ""),
         encoding="utf-8",
     )
     assert load_task(path, app, loaded).output_dir == app.work / "导出"
     save_settings(app, loaded)
-    assert "output" not in tomllib.loads(app.settings.read_text(encoding="utf-8"))
+    assert "directory" not in tomllib.loads(app.settings.read_text(encoding="utf-8"))["output"]
 
 
 @pytest.mark.parametrize("base", [None, ".", "游戏/生存服", "absolute"])
@@ -191,7 +193,7 @@ def test_volume_strings_load_in_both_configs(workspace, text, size):
     for config in (app.settings, path):
         config.write_text(
             config.read_text(encoding="utf-8").replace(
-                'volume_size_bytes = "0"', f'volume_size_bytes = "{text}"'
+                'compression_volume_size = "0"', f'compression_volume_size = "{text}"'
             ),
             encoding="utf-8",
         )
@@ -245,8 +247,8 @@ def test_invalid_volume_strings(value):
 def test_settings_volume_string_roundtrip_is_exact(workspace, size):
     app, _, settings = workspace
     save_settings(app, replace(settings, volume_size=size))
-    saved = tomllib.loads(app.settings.read_text(encoding="utf-8"))["compression"][
-        "volume_size_bytes"
+    saved = tomllib.loads(app.settings.read_text(encoding="utf-8"))["output"][
+        "compression_volume_size"
     ]
     assert isinstance(saved, str)
     assert load_settings(app).volume_size == size
@@ -255,11 +257,13 @@ def test_settings_volume_string_roundtrip_is_exact(workspace, size):
 
 def test_full_task_inherits_global_volume_and_can_disable_it(workspace):
     app, _, settings = workspace
-    settings = replace(settings, volume_size=4_000_000_000)
+    settings = replace(settings, level=7, volume_size=4_000_000_000)
     path = write_task(app, full=True)
     content = path.read_text(encoding="utf-8")
-    path.write_text(content.replace('volume_size_bytes = "0"', ""), encoding="utf-8")
-    assert load_task(path, app, settings).volume_size == settings.volume_size
+    path.write_text(content.replace('compression_volume_size = "0"', ""), encoding="utf-8")
+    config = load_task(path, app, settings)
+    assert config.level == settings.level
+    assert config.volume_size == settings.volume_size
     path.write_text(content, encoding="utf-8")
     assert load_task(path, app, settings).volume_size == 0
 
@@ -268,13 +272,42 @@ def test_task_values_override_global_and_mrpack_ignores_global_split(workspace):
     app, _, settings = workspace
     path = write_task(app)
     path.write_text(
-        path.read_text(encoding="utf-8").replace('volume_size_bytes = "0"', "level = 9"),
+        path.read_text(encoding="utf-8").replace(
+            'compression_volume_size = "0"', "compression_level = 9"
+        ),
         encoding="utf-8",
     )
     c = load_task(path, app, replace(settings, volume_size=1_000_000_000))
     assert c.level == 9 and c.volume_size == 0
     path = write_task(app, volume=65536)
     with pytest.raises(ExportError, match="mrpack"):
+        load_task(path, app, settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("compression_level", "true"),
+        ("compression_level", "2"),
+        ("compression_volume_size", "1024"),
+        ("compression_volume_size", '"invalid"'),
+    ],
+)
+def test_invalid_output_compression_in_both_configs(workspace, field, value):
+    app, _, settings = workspace
+    path = write_task(app, full=True)
+    for config in (app.settings, path):
+        content = config.read_text(encoding="utf-8")
+        content = "\n".join(
+            line for line in content.splitlines() if not line.startswith(f"{field} =")
+        )
+        config.write_text(
+            content.replace("[output]\n", f"[output]\n{field} = {value}\n"),
+            encoding="utf-8",
+        )
+    with pytest.raises(ExportError):
+        load_settings(app)
+    with pytest.raises(ExportError):
         load_task(path, app, settings)
 
 

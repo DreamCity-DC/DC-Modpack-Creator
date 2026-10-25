@@ -23,8 +23,13 @@ instance_dir = ".minecraft/versions/26.3-Fabric"
 executable = "启动Minecraft.exe"
 
 [output]
-# 成品输出目录
+# 整合包最终导出位置
 directory = "导出"
+# 可选：单独调整本任务的压缩参数；省略时使用工具设置（mrpack 始终不继承分卷大小）
+# 压缩等级，可选0/1/3/5/7/9
+# compression_level = 5
+# 分卷压缩大小，仅完整包支持，例如 "400MB" / "4GB" / "0"（0表示不分卷压缩）
+# compression_volume_size = "0"
 
 
 [files]
@@ -95,12 +100,3 @@ rules = '''
 # [[extras]]
 # source = "使用说明.txt"
 # destination = "使用说明.txt"
-
-
-# 可选：如果想单独调整整合包压缩参数，解除下面的注释
-
-# [compression]
-# # 压缩等级，可选0/1/3/5/7/9
-# level = 5
-# # 分卷压缩大小，可填类似："400MB" / "4GB" / "0"（0表示不分卷压缩）
-# volume_size_bytes = "0"

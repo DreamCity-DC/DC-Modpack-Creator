@@ -43,8 +43,8 @@ instance_dir = ".minecraft/versions/客户端"
 executable = "本地启动器.exe"
 [files]
 rules = "mods/"
-[compression]
-volume_size_bytes = "{str(volume) + "B" if volume else "0"}"
+[output]
+compression_volume_size = "{str(volume) + "B" if volume else "0"}"
 ''',
         encoding="utf-8",
     )

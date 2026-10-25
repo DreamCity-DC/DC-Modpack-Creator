@@ -86,8 +86,7 @@ rules = """
         + f'''
 [output]
 directory = "{output}"
-[compression]
-volume_size_bytes = "{str(volume) + "B" if volume else "0"}"
+compression_volume_size = "{str(volume) + "B" if volume else "0"}"
 '''
         + extra,
         encoding="utf-8",

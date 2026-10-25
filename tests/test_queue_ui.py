@@ -80,7 +80,7 @@ def test_settings_exact_units_without_volume_limits(workspace):
     assert dialog.volume_bytes() == 4 * 1024**3
     dialog.save()
     assert load_settings(app).volume_size == 4_294_967_296
-    assert 'volume_size_bytes = "4GB"' in app.settings.read_text(encoding="utf-8")
+    assert 'compression_volume_size = "4GB"' in app.settings.read_text(encoding="utf-8")
     dialog = SettingsDialog(app, load_settings(app))
     assert dialog.volume.currentText() == "4 GB"
     dialog.volume.setCurrentIndex(4)
@@ -98,7 +98,7 @@ def test_settings_exact_units_without_volume_limits(workspace):
     assert dialog.volume_bytes() == 1_572_864
     dialog.save()
     assert load_settings(app).volume_size == 1_572_864
-    assert 'volume_size_bytes = "1.5MB"' in app.settings.read_text(encoding="utf-8")
+    assert 'compression_volume_size = "1.5MB"' in app.settings.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("volume_size", [0, 2 * 1024**3, 1_572_864])

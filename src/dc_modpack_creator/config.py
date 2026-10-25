@@ -153,13 +153,13 @@ def integer(data: dict, key: str, default: int) -> int:
 
 def parse_volume_size(value: Any) -> int:
     if not isinstance(value, str):
-        raise ExportError('volume_size_bytes 必须是容量字符串，例如 "2GB"；"0" 关闭分卷')
+        raise ExportError('compression_volume_size 必须是容量字符串，例如 "2GB"；"0" 关闭分卷')
     value = value.strip()
     if value == "0":
         return 0
     match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(B|KB|MB|GB)", value, re.IGNORECASE)
     if match is None:
-        raise ExportError('volume_size_bytes 格式无效，请使用 "2GB"、"1.5MB" 或 "0"')
+        raise ExportError('compression_volume_size 格式无效，请使用 "2GB"、"1.5MB" 或 "0"')
     amount, unit = match.groups()
     factor = next(f for u, f in VOLUME_UNITS.items() if u.casefold() == unit.casefold())
     with localcontext() as context:
@@ -229,7 +229,6 @@ def load_settings(paths: AppPaths) -> Settings:
     d = read_toml(paths.settings)
     unknown = d.keys() - {
         "settings_version",
-        "compression",
         "execution",
         "output",
         "state",
@@ -239,15 +238,14 @@ def load_settings(paths: AppPaths) -> Settings:
         raise ExportError(f"未知工具设置：{', '.join(sorted(unknown))}")
     if integer(d, "settings_version", 1) != 1:
         raise ExportError("不支持的工具配置版本")
-    c = table(d, "compression", {"level", "volume_size_bytes"})
+    # Accept the legacy global output directory without applying or saving it.
+    output = table(d, "output", {"directory", "compression_level", "compression_volume_size"})
     e = table(d, "execution", {"compression_threads", "temporary_directory"})
-    # Accept legacy output settings without applying them; saving removes the table.
-    table(d, "output", {"directory"})
     s = table(d, "state", {"selected_configs"})
     w = table(d, "window", {"x", "y"})
     level, volume, threads = (
-        integer(c, "level", 5),
-        parse_volume_size(c.get("volume_size_bytes", "0")),
+        integer(output, "compression_level", 5),
+        parse_volume_size(output.get("compression_volume_size", "0")),
         integer(e, "compression_threads", 0),
     )
     validate_compression(level, volume, threads)
@@ -282,7 +280,10 @@ def save_settings(paths: AppPaths, s: Settings) -> None:
         execution["temporary_directory"] = s.temporary_directory
     data = {
         "settings_version": 1,
-        "compression": {"level": s.level, "volume_size_bytes": format_volume_size(s.volume_size)},
+        "output": {
+            "compression_level": s.level,
+            "compression_volume_size": format_volume_size(s.volume_size),
+        },
         "execution": execution,
         "state": {"selected_configs": list(s.selected_configs)},
         "window": s.window,
@@ -308,7 +309,6 @@ def load_task(path: Path, paths: AppPaths, settings: Settings) -> TaskConfig:
         "output",
         "files",
         "extras",
-        "compression",
     }
     if unknown:
         raise ExportError(f"未知任务字段：{', '.join(sorted(unknown))}")
@@ -318,9 +318,8 @@ def load_task(path: Path, paths: AppPaths, settings: Settings) -> TaskConfig:
     source = table(d, "source", {"base_dir", "instance_dir"})
     base_dir = resolve_path(string(source, "base_dir", "."), paths.work)
     launcher = table(d, "launcher", {"executable"})
-    output = table(d, "output", {"directory"})
+    output = table(d, "output", {"directory", "compression_level", "compression_volume_size"})
     files = table(d, "files", {"rules"})
-    c = table(d, "compression", {"level", "volume_size_bytes"})
     name, version = (string(p, key, "", allow_empty=True).strip() for key in ("name", "version"))
     if not name and not version:
         raise ExportError("配置名称缺失")
@@ -328,10 +327,10 @@ def load_task(path: Path, paths: AppPaths, settings: Settings) -> TaskConfig:
     full = p.get("full_package", False)
     if type(full) is not bool:
         raise ExportError("full_package 必须是 true 或 false")
-    level = integer(c, "level", settings.level)
+    level = integer(output, "compression_level", settings.level)
     volume = (
-        parse_volume_size(c["volume_size_bytes"])
-        if "volume_size_bytes" in c
+        parse_volume_size(output["compression_volume_size"])
+        if "compression_volume_size" in output
         else settings.volume_size
         if full
         else 0
